@@ -114,7 +114,7 @@ class SumoEnvironment(gym.Env):
         observation_class: ObservationFunction = DefaultObservationFunction,
         add_system_info: bool = True,
         add_per_agent_info: bool = True,
-        sumo_seed: Union[str, int] = 42,
+        sumo_seed: Union[str, int] = "random",
         sumo_warnings: bool = True,
         additional_sumo_cmd: Optional[str] = None,
         render_mode: Optional[str] = None,
@@ -228,8 +228,6 @@ class SumoEnvironment(gym.Env):
         self.metrics = []
         self.total_reward = 0
 
-        if seed is not None:
-            self.sumo_seed = seed
         self._start_simulation()
 
         # reset logger

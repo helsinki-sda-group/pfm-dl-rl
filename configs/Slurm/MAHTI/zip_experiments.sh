@@ -30,7 +30,13 @@ fi
 FILES_TO_ZIP=()
 
 while IFS=, read -r JOB_NAME JOB_ID STATUS; do
-    [[ "$JOB_NAME" =~ ^#.*$ ]] || [[ -z "$JOB_NAME" ]] && continue
+    # SKIP LOGIC: 
+    # 1. Starts with # (Comment)
+    # 2. JOB_NAME is empty
+    # 3. JOB_ID is not a number (Filters out summary text, headers, and separator lines)
+    if [[ "$JOB_NAME" =~ ^#.*$ ]] || [[ -z "$JOB_NAME" ]] || [[ ! "$JOB_ID" =~ ^[0-9]+$ ]]; then
+        continue
+    fi
 
     MATCHES=( "$SEARCH_DIR"/*_"$JOB_NAME" )
     
@@ -41,11 +47,13 @@ while IFS=, read -r JOB_NAME JOB_ID STATUS; do
         [ -e "$FOLDER" ] || continue
         
         FOLDER_NAME=$(basename "$FOLDER")
+
+        [ -f "$FOLDER/time.txt" ] || continue
         
         # Extract Timestamp part
         TS_PART=$(echo "$FOLDER_NAME" | cut -d'_' -f1)
         
-        # FIX: Use sed instead of tr to remove T, -, and :
+        # Remove T, -, and :
         FOLDER_DATE_STR=$(echo "$TS_PART" | sed 's/[-T:]//g')
         
         [[ ! "$FOLDER_DATE_STR" =~ ^[0-9]{14}$ ]] && continue

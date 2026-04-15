@@ -17,9 +17,12 @@
 # Network areas: "toy" (old network) or "area1" (Helsinki area 1)
 AREAS=("toy" "area1")
 
+# Demand levels (used in area1 SUMOCFG paths)
+DEMAND_LEVELS=("0.1" "0.2" "0.3")
+
 # Number of parallel SUMO environments and corresponding CPU allocation
 # Format: "num_envs:cpus"
-ENV_CORES_PAIRS=("1:3" "2:4" "4:6" "8:10" "16:18" "32:34")
+ENV_CORES_PAIRS=("1:3" "2:4" "4:6" "8:10" "16:18" "32:34" "64:66" "96:98" "126:128")
 
 # Delta and Scaling coefficient combinations (specific pairs, not all combinations)
 # Format: "delta:scaling_coef"
@@ -34,10 +37,11 @@ DELTA_SCALING_PAIRS=(
 TOY_EPISODES=(32 64 128)
 AREA1_EPISODES=(128 256 1024)
 
-# Gradient steps and train frequency combinations
-# Format: "gradient_steps:train_freq"
-# Note: "n" means use num_envs value, represented as -1
-GRAD_TRAINFREQ_PAIRS=("1:1" "1:4" "-1:1" "-1:4")
+# Gradient steps values
+GRAD=("1" "-1")
+
+# Config files (these contain train_freq settings)
+CONFIGS=("base.yaml")
 
 #=============================================================================
 # SLURM CONFIGURATION
@@ -193,6 +197,15 @@ get_max_env() {
 }
 
 #=============================================================================
+# FUNCTION: Extract base name from config file (e.g., "faster.yaml" -> "faster")
+#=============================================================================
+
+get_config_basename() {
+    local config="$1"
+    echo "${config%.yaml}"
+}
+
+#=============================================================================
 # FUNCTION: Calculate time limit based on area, num_envs, and episodes
 #=============================================================================
 
@@ -248,6 +261,27 @@ get_time_limit() {
                     1024) echo "3-00:00:00" ;;
                 esac
                 ;;
+            64)
+                case $episodes in
+                    126)  echo "1-00:00:00" ;;
+                    256)  echo "1-00:00:00" ;;
+                    1024) echo "3-00:00:00" ;;
+                esac
+                ;;
+            96)
+                case $episodes in
+                    126)  echo "1-00:00:00" ;;
+                    256)  echo "1-00:00:00" ;;
+                    1024) echo "3-00:00:00" ;;
+                esac
+                ;;
+            126)
+                case $episodes in
+                    126)  echo "1-00:00:00" ;;
+                    256)  echo "1-00:00:00" ;;
+                    1024) echo "3-00:00:00" ;;
+                esac
+                ;;
         esac
     fi
 }
@@ -279,11 +313,15 @@ for AREA in "${AREAS[@]}"; do
         EPISODES_LIST=("${AREA1_EPISODES[@]}")
     fi
     
-    for BASIC_EPISODES in "${EPISODES_LIST[@]}"; do
-        for ENV_CORES in "${ENV_CORES_PAIRS[@]}"; do
-            for DELTA_SCALING in "${DELTA_SCALING_PAIRS[@]}"; do
-                for GRAD_TF in "${GRAD_TRAINFREQ_PAIRS[@]}"; do
-                    ((TOTAL_JOBS_PREVIEW++))
+     for DEMAND in "${DEMAND_LEVELS[@]}"; do
+        for BASIC_EPISODES in "${EPISODES_LIST[@]}"; do
+            for ENV_CORES in "${ENV_CORES_PAIRS[@]}"; do
+                for DELTA_SCALING in "${DELTA_SCALING_PAIRS[@]}"; do
+                    for GRADIENT_STEPS in "${GRAD[@]}"; do
+                        for CONFIG in "${CONFIGS[@]}"; do
+                            ((TOTAL_JOBS_PREVIEW++))
+                        done
+                    done
                 done
             done
         done
@@ -304,11 +342,13 @@ if [ "$DRY_RUN" == false ]; then
     SUMMARY_TEXT+="\n"
     SUMMARY_TEXT+="\nParameter combinations:"
     SUMMARY_TEXT+="\n  Areas: ${AREAS[*]}"
+    SUMMARY_TEXT+="\n  Demand levels: ${DEMAND_LEVELS[*]}"
     SUMMARY_TEXT+="\n  Env-Cores pairs: ${ENV_CORES_PAIRS[*]}"
     SUMMARY_TEXT+="\n  Delta-Scaling pairs: ${#DELTA_SCALING_PAIRS[@]} combinations"
     SUMMARY_TEXT+="\n  Episodes (toy): ${TOY_EPISODES[*]}"
     SUMMARY_TEXT+="\n  Episodes (area1): ${AREA1_EPISODES[*]}"
-    SUMMARY_TEXT+="\n  Gradient-TrainFreq pairs: ${GRAD_TRAINFREQ_PAIRS[*]}"
+    SUMMARY_TEXT+="\n  Gradient steps: ${GRAD[*]}"
+    SUMMARY_TEXT+="\n  Config files: ${CONFIGS[*]}"
     SUMMARY_TEXT+="\n  Seed: ${SEED}"
     SUMMARY_TEXT+="\n"
     SUMMARY_TEXT+="\nExperiment log will be saved to: $EXPERIMENT_LOG_FILE"
@@ -344,11 +384,6 @@ fi
 echo "Submitting experiment jobs..."
 echo ""
 
-# Calculate max env value for scaling
-MAX_ENV=$(get_max_env)
-echo "Using MAX_ENV=$MAX_ENV for train frequency scaling"
-echo ""
-
 for AREA in "${AREAS[@]}"; do
     # Select episodes based on area
     if [ "$AREA" == "toy" ]; then
@@ -357,76 +392,77 @@ for AREA in "${AREAS[@]}"; do
         EPISODES_LIST=("${AREA1_EPISODES[@]}")
     fi
 
-    for BASIC_EPISODES in "${EPISODES_LIST[@]}"; do
-        for ENV_CORES in "${ENV_CORES_PAIRS[@]}"; do
-            # Parse num_envs and cpus from pair
-            NUM_ENVS="${ENV_CORES%%:*}"
-            CPUS="${ENV_CORES##*:}"
+    for DEMAND in "${DEMAND_LEVELS[@]}"; do
+        for BASIC_EPISODES in "${EPISODES_LIST[@]}"; do
+            for ENV_CORES in "${ENV_CORES_PAIRS[@]}"; do
 
-            for DELTA_SCALING in "${DELTA_SCALING_PAIRS[@]}"; do
-                # Parse delta and scaling_coef from pair
-                DELTA="${DELTA_SCALING%%:*}"
-                SCALING_COEF="${DELTA_SCALING##*:}"
+                # Parse num_envs and cpus from pair
+                NUM_ENVS="${ENV_CORES%%:*}"
+                CPUS="${ENV_CORES##*:}"
 
-                for GRAD_TF in "${GRAD_TRAINFREQ_PAIRS[@]}"; do
-                    # Parse gradient_steps and train_freq from pair
-                    GRADIENT_STEPS="${GRAD_TF%%:*}"
-                    TRAIN_FREQ="${GRAD_TF##*:}"
+                for DELTA_SCALING in "${DELTA_SCALING_PAIRS[@]}"; do
+                    # Parse delta and scaling_coef from pair
+                    DELTA="${DELTA_SCALING%%:*}"
+                    SCALING_COEF="${DELTA_SCALING##*:}"
 
-                    # Calculate scaled train frequency: scaled_train_freq = MAX_ENV * train_freq / num_envs
-                    SCALED_TRAIN_FREQ=$(awk "BEGIN {printf \"%.0f\", $MAX_ENV * $TRAIN_FREQ / $NUM_ENVS}")
+                    for GRADIENT_STEPS in "${GRAD[@]}"; do
+                        for CONFIG in "${CONFIGS[@]}"; do
+                            # Extract config basename for job naming
+                            CONFIG_BASE=$(get_config_basename "$CONFIG")
 
-                    # Build job name
-                    JOB_NAME="${AREA}_ep${BASIC_EPISODES}_env${NUM_ENVS}_delta${DELTA}_sc${SCALING_COEF}_gs${GRADIENT_STEPS}_tf${TRAIN_FREQ}_stf${SCALED_TRAIN_FREQ}_seed${SEED}"
+                            # Build job name
+                            JOB_NAME="${AREA}_dm${DEMAND}_ep${BASIC_EPISODES}_env${NUM_ENVS}_delta${DELTA}_sc${SCALING_COEF}_gs${GRADIENT_STEPS}_cfg${CONFIG_BASE}_seed${SEED}"
 
-                    # Check if we should skip this job
-                    if [ "$FOUND_START" == false ]; then
-                        if [ "$JOB_NAME" == "$START_FROM_JOB" ]; then
-                            FOUND_START=true
-                            echo ">>> Found starting job: $JOB_NAME <<<"
-                            echo ""
-                        else
-                            ((SKIPPED_COUNT++))
-                            continue
-                        fi
-                    fi
 
-                    # Track first job that will be run
-                    if [ -z "$FIRST_JOB_TO_RUN" ]; then
-                        FIRST_JOB_TO_RUN="$JOB_NAME"
-                    fi
+                            # Check if we should skip this job
+                            if [ "$FOUND_START" == false ]; then
+                                if [ "$JOB_NAME" == "$START_FROM_JOB" ]; then
+                                    FOUND_START=true
+                                    echo ">>> Found starting job: $JOB_NAME <<<"
+                                    echo ""
+                                else
+                                    ((SKIPPED_COUNT++))
+                                    continue
+                                fi
+                            fi
 
-                    # Calculate time limit
-                    TIME_LIMIT=$(get_time_limit "$AREA" "$NUM_ENVS" "$BASIC_EPISODES")
+                            # Track first job that will be run
+                            if [ -z "$FIRST_JOB_TO_RUN" ]; then
+                                FIRST_JOB_TO_RUN="$JOB_NAME"
+                            fi
 
-                    # Build sbatch command
-                    SBATCH_CMD="sbatch \
-                        --job-name=\"${JOB_NAME}\" \
-                        --output=\"slurm_output/%A-%x-stdout.log\" \
-                        --error=\"slurm_output/%A-%x-stderr.log\" \
-                        --account=${ACCOUNT} \
-                        --time=${TIME_LIMIT} \
-                        --nodes=1 \
-                        --ntasks=1 \
-                        --cpus-per-task=${CPUS} \
-                        --partition=${PARTITION} \
-                        --contiguous \
-                        --mail-user=${MAIL_USER} \
-                        --mail-type=FAIL,TIME_LIMIT \
-                        --export=ALL,AREA=${AREA},BASIC_EPISODES=${BASIC_EPISODES},SEED=${SEED},DELTA=${DELTA},NUM_ENVS=${NUM_ENVS},TRAIN_FREQ=${TRAIN_FREQ},SCALED_TRAIN_FREQ=${SCALED_TRAIN_FREQ},GRADIENT_STEPS=${GRADIENT_STEPS},SCALING_COEF=${SCALING_COEF},JOB_NAME=${JOB_NAME} \
-                        ${TEMPLATE_SCRIPT}"
+                            # Calculate time limit
+                            TIME_LIMIT=$(get_time_limit "$AREA" "$NUM_ENVS" "$BASIC_EPISODES")
 
-                    if [ "$DRY_RUN" == true ]; then
-                        echo "[DRY RUN] Would submit: $JOB_NAME"
-                        echo "  CPUs: $CPUS, Time: $TIME_LIMIT"
-                        echo ""
-                    else
-                        echo "Submitting: $JOB_NAME"
-                        submit_job "$JOB_NAME" "$SBATCH_CMD"
-                    fi
+                            # Build sbatch command
+                            SBATCH_CMD="sbatch \
+                                --job-name=\"${JOB_NAME}\" \
+                                --output=\"slurm_output/%A-%x-stdout.log\" \
+                                --error=\"slurm_output/%A-%x-stderr.log\" \
+                                --account=${ACCOUNT} \
+                                --time=${TIME_LIMIT} \
+                                --nodes=1 \
+                                --ntasks=1 \
+                                --cpus-per-task=${CPUS} \
+                                --partition=${PARTITION} \
+                                --contiguous \
+                                --mail-user=${MAIL_USER} \
+                                --mail-type=FAIL,TIME_LIMIT \
+                                --export=ALL,AREA=${AREA},DEMAND=${DEMAND},BASIC_EPISODES=${BASIC_EPISODES},SEED=${SEED},DELTA=${DELTA},NUM_ENVS=${NUM_ENVS},GRADIENT_STEPS=${GRADIENT_STEPS},SCALING_COEF=${SCALING_COEF},CONFIG=${CONFIG},JOB_NAME=${JOB_NAME} \
+                                ${TEMPLATE_SCRIPT}"
 
-                    ((JOB_COUNT++))
+                            if [ "$DRY_RUN" == true ]; then
+                                echo "[DRY RUN] Would submit: $JOB_NAME"
+                                echo "  CPUs: $CPUS, Time: $TIME_LIMIT"
+                                echo ""
+                            else
+                                echo "Submitting: $JOB_NAME"
+                                submit_job "$JOB_NAME" "$SBATCH_CMD"
+                            fi
 
+                            ((JOB_COUNT++))
+                        done
+                    done
                 done
             done
         done
@@ -449,31 +485,55 @@ fi
 # Count successful and failed submissions
 SUCCESSFUL_SUBMISSIONS=$((JOB_COUNT - ${#FAILED_JOBS[@]}))
 
-echo "Summary:"
-if [ -n "$FIRST_JOB_TO_RUN" ]; then
-    echo "  First job to run: $FIRST_JOB_TO_RUN"
-fi
-if [ $SKIPPED_COUNT -gt 0 ]; then
-    echo "  Jobs skipped: $SKIPPED_COUNT ($SKIP_PERCENTAGE%)"
-fi
-echo "  Jobs attempted: $JOB_COUNT ($SUBMIT_PERCENTAGE%)"
-echo "  Successful submissions: $SUCCESSFUL_SUBMISSIONS"
-echo "  Failed submissions: ${#FAILED_JOBS[@]}"
-echo "  Total jobs in sequence: $TOTAL_JOBS"
-echo ""
 if [ "$DRY_RUN" == false ]; then
-    echo "  Experiment log saved to: $EXPERIMENT_LOG_FILE"
+    echo "Summary:"
+    if [ -n "$FIRST_JOB_TO_RUN" ]; then
+        echo "  First job to run: $FIRST_JOB_TO_RUN"
+    fi
+    if [ $SKIPPED_COUNT -gt 0 ]; then
+        echo "  Jobs skipped: $SKIPPED_COUNT ($SKIP_PERCENTAGE%)"
+    fi
+    echo "  Jobs attempted: $JOB_COUNT ($SUBMIT_PERCENTAGE%)"
+    echo "  Successful submissions: $SUCCESSFUL_SUBMISSIONS"
+    echo "  Failed submissions: ${#FAILED_JOBS[@]}"
+    echo "  Total jobs in sequence: $TOTAL_JOBS"
     echo ""
+    if [ "$DRY_RUN" == false ]; then
+        echo "  Experiment log saved to: $EXPERIMENT_LOG_FILE"
+        echo ""
+    fi
+    echo "  Parameter combinations:"
+    echo "    Areas: ${AREAS[*]}"
+    echo "    Demand levels: ${DEMAND_LEVELS[*]}"
+    echo "    Env-Cores pairs: ${ENV_CORES_PAIRS[*]}"
+    echo "    Delta-Scaling pairs: ${#DELTA_SCALING_PAIRS[@]} combinations"
+    echo "    Episodes (toy): ${TOY_EPISODES[*]}"
+    echo "    Episodes (area1): ${AREA1_EPISODES[*]}"
+    echo "    Gradient steps: ${GRAD[*]}"
+    echo "    Config files: ${CONFIGS[*]}"
+    echo "    Seed: ${SEED}"
+    echo "=============================================================================";
 fi
-echo "  Parameter combinations:"
-echo "    Areas: ${AREAS[*]}"
-echo "    Env-Cores pairs: ${ENV_CORES_PAIRS[*]}"
-echo "    Delta-Scaling pairs: ${#DELTA_SCALING_PAIRS[@]} combinations"
-echo "    Episodes (toy): ${TOY_EPISODES[*]}"
-echo "    Episodes (area1): ${AREA1_EPISODES[*]}"
-echo "    Gradient-TrainFreq pairs: ${GRAD_TRAINFREQ_PAIRS[*]}"
-echo "    Seed: ${SEED}"
-echo "=============================================================================";
+
+if [ "$DRY_RUN" == true ]; then
+    echo "Summary:"
+    if [ -n "$FIRST_JOB_TO_RUN" ]; then
+        echo "  First job to run: $FIRST_JOB_TO_RUN"
+    fi
+    echo "  Jobs to be submitted: $SUCCESSFUL_SUBMISSIONS"
+    echo ""
+    echo "  Parameter combinations:"
+    echo "    Areas: ${AREAS[*]}"
+    echo "    Demand levels: ${DEMAND_LEVELS[*]}"
+    echo "    Env-Cores pairs: ${ENV_CORES_PAIRS[*]}"
+    echo "    Delta-Scaling pairs: ${#DELTA_SCALING_PAIRS[@]} combinations"
+    echo "    Episodes (toy): ${TOY_EPISODES[*]}"
+    echo "    Episodes (area1): ${AREA1_EPISODES[*]}"
+    echo "    Gradient steps: ${GRAD[*]}"
+    echo "    Config files: ${CONFIGS[*]}"
+    echo "    Seed: ${SEED}"
+    echo "=============================================================================";
+fi
 
 # Report failed jobs if any
 if [ ${#FAILED_JOBS[@]} -gt 0 ]; then

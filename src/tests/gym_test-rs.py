@@ -4,7 +4,6 @@ import multiprocessing as mp
 
 import sys
 import time
-import faulthandler
 
 sys.path.append('./src')
 
@@ -15,7 +14,6 @@ from stable_baselines3.dqn.dqn import DQN
 from stable_baselines3.common.vec_env import VecMonitor
 
 import numpy as np
-import matplotlib.pyplot as plt
 import random
 
 from stable_baselines3.common.monitor import Monitor
@@ -42,26 +40,23 @@ from sumo_rl_rs.environment import SumoEnvironment
 # these functions implement a number of baseline policies
 # when a fixed action is applied to predefined windows
 
-def make_env(rank: int = 0, policy = None):
+def make_env(policy = None):
     """
     Returns the SUMO gym environment. The policy argument is optional and can be used when testing baselines
     """
-    sumo_log_file = os.path.join(OUTPUT_DIR, f'sumolog_rank{rank}.txt')
-
     # Get the taxi_logger configuration with default values
     cfg_taxi_logger = cfg.env.get('taxi_reservations_logger', {})
     log_taxis = cfg_taxi_logger.get('log_taxis', False)
     log_reservations = cfg_taxi_logger.get('log_reservations', False)
     show_graph = cfg_taxi_logger.get('show_graph', False)
-    
+
     env = gym.make(
         "sumo-rl-rs-v0",
         #num_seconds=100,
         use_gui=cfg.env.use_gui,
         delta_time=cfg.env.delta,
         cfg_file=cfg.env.sumocfg,
-        additional_sumo_cmd=f"--log {sumo_log_file}",
-        sumo_seed=cfg.env.sumo_seed + rank,
+        sumo_seed="random",
         verbose=cfg.env.verbose,
         taxi_reservations_logger=TaxiReservationsLogger(log_taxis, log_reservations, show_graph),
         observations_dim = cfg.env.obs_dim
@@ -71,8 +66,7 @@ def make_env(rank: int = 0, policy = None):
 
 def env_factory(rank: int, base_seed: int):
     def _init():
-        faulthandler.enable()
-        env = make_env(rank)
+        env = make_env()
         env.reset(seed=base_seed + rank)
         return env
 
@@ -230,23 +224,33 @@ if __name__ == "__main__":
         vec_env = VecMonitor(vec_env, train_log_dir)
 
         # ------- EVAL ENV ------- #
-        eval_vec_env = SubprocVecEnv([env_factory(rank = 0, base_seed=10_000)])  # always 1 eval env
+        # ! new - eval random seeds, 3 eval envs
+        eval_vec_env = SubprocVecEnv([env_factory(rank = cfg.env.num_envs+1+i, base_seed=10_000 * (i+1)) for i in range(0,3)])  # 3 eval env
         eval_vec_env = VecMonitor(eval_vec_env, eval_log_dir)
+
+        # ! new - grad_steps = -1 should not be scaled with num_envs
+        grad_steps = cfg.dqn.gradient_steps
+        # now we do not scale grad_steps
+        # if grad_steps > 0:
+            # in vectorized environments, 
+            # one call to env.step() produces n_env transitions
+            # we scale number of gradient updates to keep 
+            # the same ratio of gradient steps to transitions
+        #    grad_steps = grad_steps * cfg.env.num_envs
  
         # print("Creating model") 
         model = DQN(
             env=vec_env,
+            # ! new parameter - batch size
+            batch_size=cfg.dqn.batch_size,
             policy=cfg.dqn.policy,
             learning_rate=cfg.dqn.learning_rate,
             learning_starts=cfg.dqn.learning_starts,
             buffer_size=cfg.dqn.buffer_size,
             # after every train_freq calls to env.step(), call the learner
             train_freq=cfg.dqn.train_freq,
-            # in vectorized environments, 
-            # one call to env.step() produces n_env transitions
-            # we scale number of gradient updates to keep 
-            # the same ratio of gradient steps to transitions
-            gradient_steps=cfg.dqn.gradient_steps * cfg.env.num_envs,
+            # we do not scale grad_steps
+            gradient_steps=grad_steps,
             # in environment steps (global), does not depend on num_env
             # target_update_interval cannot be smaller than 100 (for the stability)
             target_update_interval=max (100, int(cfg.dqn.target_update_interval/delta)),    
@@ -265,7 +269,7 @@ if __name__ == "__main__":
             # each env.step() num_envs transitions is added 
             # so we need to scale down eval_freq by num_env as well
             eval_freq=int(cfg.eval.eval_freq/delta/cfg.env.num_envs),        
-            n_eval_episodes=1,       # fixed batch for eval
+            n_eval_episodes=3,       # fixed batch for eval
             deterministic=True,
             render=False,
         )
@@ -291,6 +295,11 @@ if __name__ == "__main__":
         #   rl_steps = 100, episodes = 120 * 30 = 3600
         #   total_timesteps = 100 x 3600 (100 rl_steps per episode, 3600 episodes) 
         #   training will slow down up to delta times (more SUMO instances)
+
+        # episodes_scaling_coeff in [0;1] controls the number of episodes
+        # compared to basic_episodes
+        #   0 - no scaling (option (1) above)
+        #   1 - full scaling (option (2) above)
 
 
         # according to notations in the paper:
